@@ -1374,6 +1374,8 @@ exports.isTouchPad = ua.indexOf("TouchPad") >= 0;
 
 exports.isChromeOS = ua.indexOf(" CrOS ") >= 0;
 
+exports.isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+
 });
 
 ace.define("ace/lib/event",["require","exports","module","ace/lib/keys","ace/lib/useragent"], function(acequire, exports, module) {
@@ -1920,8 +1922,12 @@ var BROKEN_SETDATA = useragent.isChrome < 18;
 var USE_IE_MIME_TYPE =  useragent.isIE;
 
 var TextInput = function(parentNode, host) {
+    var self = this;
     var text = dom.createElement("textarea");
-    text.className = "ace_text-input";
+    text.className = useragent.isIOS ? "ace_text-input ace_text-input-ios" : "ace_text-input";
+
+    if (useragent.isTouchPad)
+        text.setAttribute("x-palm-disable-auto-cap", true);
 
     text.setAttribute("wrap", "off");
     text.setAttribute("autocorrect", "off");
@@ -1931,9 +1937,10 @@ var TextInput = function(parentNode, host) {
     text.style.opacity = "0";
     parentNode.insertBefore(text, parentNode.firstChild);
 
-    var PLACEHOLDER = "\u2028\u2028";
+    var PLACEHOLDER = "\n aaaa a\n";
 
     var copied = false;
+    var cut = false;
     var pasted = false;
     var inComposition = false;
     var tempStyle = '';
@@ -1986,8 +1993,8 @@ var TextInput = function(parentNode, host) {
             selectionStart = 0;
             selectionEnd = isEmpty ? 0 : text.value.length - 1;
         } else {
-            var selectionStart = isEmpty ? 2 : 1;
-            var selectionEnd = 2;
+            var selectionStart = isEmpty ? 5 : 4;
+            var selectionEnd = 5;
         }
         try {
             text.setSelectionRange(selectionStart, selectionEnd);
@@ -2021,9 +2028,7 @@ var TextInput = function(parentNode, host) {
     };
 
     var onSelect = function(e) {
-        if (copied) {
-            copied = false;
-        } else if (isAllSelected(text)) {
+        if (isAllSelected(text)) {
             host.selectAll();
             resetSelection();
         } else if (inputHandler) {
@@ -2037,6 +2042,9 @@ var TextInput = function(parentNode, host) {
     var afterContextMenu = false;
     
     var sendText = function(data) {
+        if (text.selectionStart === 4 && text.selectionEnd === 5) {
+          return;
+        }
         if (inputHandler) {
             data = inputHandler(data);
             inputHandler = null;
@@ -2046,23 +2054,27 @@ var TextInput = function(parentNode, host) {
             if (data)
                 host.onPaste(data);
             pasted = false;
-        } else if (data == PLACEHOLDER.charAt(0)) {
+        } else if (data == PLACEHOLDER.substr(0) && text.selectionStart === 4) {
             if (afterContextMenu)
                 host.execCommand("del", {source: "ace"});
             else // some versions of android do not fire keydown when pressing backspace
                 host.execCommand("backspace", {source: "ace"});
-        } else {
-            if (data.substring(0, 2) == PLACEHOLDER)
-                data = data.substr(2);
-            else if (data.charAt(0) == PLACEHOLDER.charAt(0))
-                data = data.substr(1);
+        } else if (!copied) {
+            if (data.substring(0, 9) == PLACEHOLDER && data.length > PLACEHOLDER.length)
+                data = data.substr(9);
+            else if (data.substr(0, 4) == PLACEHOLDER.substr(0, 4))
+                data = data.substr(4, data.length - PLACEHOLDER.length + 1);
             else if (data.charAt(data.length - 1) == PLACEHOLDER.charAt(0))
                 data = data.slice(0, -1);
-            if (data.charAt(data.length - 1) == PLACEHOLDER.charAt(0))
+            if (data == PLACEHOLDER.charAt(0)) {
+            } else if (data.charAt(data.length - 1) == PLACEHOLDER.charAt(0))
                 data = data.slice(0, -1);
             
             if (data)
                 host.onTextInput(data);
+        }
+        if (copied) {
+          copied = false;
         }
         if (afterContextMenu)
             afterContextMenu = false;
@@ -2098,8 +2110,16 @@ var TextInput = function(parentNode, host) {
             return event.preventDefault(e);
 
         if (handleClipboardData(e, data)) {
+            if (useragent.isIOS) {
+                cut = isCut;
+                text.value = "\n aa" + data + "a a\n";
+                text.setSelectionRange(4, 4 + data.length);
+                copied = {
+                    value: data
+                };
+            }
             isCut ? host.onCut() : host.onCopy();
-            event.preventDefault(e);
+            if (!useragent.isIOS) event.preventDefault(e);
         } else {
             copied = true;
             text.value = data;
@@ -2324,569 +2344,96 @@ var TextInput = function(parentNode, host) {
     });
     event.addListener(host.renderer.scroller, "contextmenu", onContextMenu);
     event.addListener(text, "contextmenu", onContextMenu);
-};
-
-exports.TextInput = TextInput;
-});
-
-ace.define("ace/keyboard/textinput_ios",["require","exports","module","ace/lib/event","ace/lib/useragent","ace/lib/dom","ace/lib/lang"], function(acequire, exports, module) {
-"use strict";
-
-var event = acequire("../lib/event");
-var useragent = acequire("../lib/useragent");
-var dom = acequire("../lib/dom");
-var lang = acequire("../lib/lang");
-var BROKEN_SETDATA = useragent.isChrome < 18;
-var USE_IE_MIME_TYPE =  useragent.isIE;
-
-var TextInput = function(parentNode, host) {
-    var self = this;
-    var text = dom.createElement("textarea");
-    text.className = "ace_text-input ace_text-input-ios";
-
-    if (useragent.isTouchPad)
-        text.setAttribute("x-palm-disable-auto-cap", true);
-
-    text.setAttribute("wrap", "off");
-    text.setAttribute("autocorrect", "off");
-    text.setAttribute("autocapitalize", "off");
-    text.setAttribute("spellcheck", false);
-
-    text.style.opacity = "0";
-    parentNode.insertBefore(text, parentNode.firstChild);
-
-    var PLACEHOLDER = "\n aaaa a\n";
-
-    var copied = false;
-    var cut = false;
-    var pasted = false;
-    var inComposition = false;
-    var tempStyle = '';
-    var isSelectionEmpty = true;
-    try { var isFocused = document.activeElement === text; } catch(e) {}
     
-    event.addListener(text, "blur", function(e) {
-        host.onBlur(e);
-        isFocused = false;
-    });
-    event.addListener(text, "focus", function(e) {
-        isFocused = true;
-        host.onFocus(e);
-        resetSelection();
-    });
-    this.focus = function() {
-        if (tempStyle) return text.focus();
-        text.style.position = "fixed";
-        text.focus();
-    };
-    this.blur = function() {
-        text.blur();
-    };
-    this.isFocused = function() {
-        return isFocused;
-    };
-    var syncSelection = lang.delayedCall(function() {
-        isFocused && resetSelection(isSelectionEmpty);
-    });
-    var syncValue = lang.delayedCall(function() {
-         if (!inComposition) {
-            text.value = PLACEHOLDER;
-            isFocused && resetSelection();
-         }
-    });
+    if (useragent.isIOS) {
+        var typingResetTimeout = null;
+        var typing = false;
 
-    function resetSelection(isEmpty) {
-        if (inComposition)
-            return;
-        inComposition = true;
-        
-        if (inputHandler) {
-            selectionStart = 0;
-            selectionEnd = isEmpty ? 0 : text.value.length - 1;
-        } else {
-            var selectionStart = 4;
-            var selectionEnd = 5;
-        }
-        try {
-            text.setSelectionRange(selectionStart, selectionEnd);
-        } catch(e){}
-        
-        inComposition = false;
-    }
-
-    function resetValue() {
-        if (inComposition)
-            return;
-        text.value = PLACEHOLDER;
-        if (useragent.isWebKit)
-            syncValue.schedule();
-    }
-
-    useragent.isWebKit || host.addEventListener('changeSelection', function() {
-        if (host.selection.isEmpty() != isSelectionEmpty) {
-            isSelectionEmpty = !isSelectionEmpty;
-            syncSelection.schedule();
-        }
-    });
-
-    resetValue();
-    if (isFocused)
-        host.onFocus();
-
-
-    var isAllSelected = function(text) {
-        return text.selectionStart === 0 && text.selectionEnd === text.value.length;
-    };
-    if (!text.setSelectionRange && text.createTextRange) {
-        text.setSelectionRange = function(selectionStart, selectionEnd) {
-            var range = this.createTextRange();
-            range.collapse(true);
-            range.moveStart('character', selectionStart);
-            range.moveEnd('character', selectionEnd);
-            range.select();
-        };
-        isAllSelected = function(text) {
-            try {
-                var range = text.ownerDocument.selection.createRange();
-            }catch(e) {}
-            if (!range || range.parentElement() != text) return false;
-                return range.text == text.value;
-        }
-    }
-    if (useragent.isOldIE) {
-        var inPropertyChange = false;
-        var onPropertyChange = function(e){
-            if (inPropertyChange)
-                return;
-            var data = text.value;
-            if (inComposition || !data || data == PLACEHOLDER)
-                return;
-            if (e && data == PLACEHOLDER[0])
-                return syncProperty.schedule();
-
-            sendText(data);
-            inPropertyChange = true;
-            resetValue();
-            inPropertyChange = false;
-        };
-        var syncProperty = lang.delayedCall(onPropertyChange);
-        event.addListener(text, "propertychange", onPropertyChange);
-
-        var keytable = { 13:1, 27:1 };
-        event.addListener(text, "keyup", function (e) {
-            if (inComposition && (!text.value || keytable[e.keyCode]))
-                setTimeout(onCompositionEnd, 0);
-            if ((text.value.charCodeAt(0)||0) < 129) {
-                return syncProperty.call();
-            }
-            inComposition ? onCompositionUpdate() : onCompositionStart();
+        parentNode.addEventListener("keydown", function (e) {
+          if (typingResetTimeout) clearTimeout(typingResetTimeout);
+          typing = true;
         });
-        event.addListener(text, "keydown", function (e) {
-            syncProperty.schedule(50);
+
+        parentNode.addEventListener("keyup", function (e) {
+          typingResetTimeout = setTimeout(function () {
+            typing = false;
+          }, 100);
+        });
+        document.addEventListener("selectionchange", function (e) {
+          if (document.activeElement !== text) {
+            return;
+          }
+          if (typing) {
+            return;
+          }
+          if (cut) {
+            setTimeout(function () {
+              cut = false;
+            }, 100);
+            return;
+          }
+          var selectionStart = text.selectionStart;
+          var selectionEnd = text.selectionEnd;
+          text.setSelectionRange(4, 5);
+          if (selectionStart == selectionEnd) {
+            switch (selectionStart) {
+              case 0:
+                host.navigateUp();
+                break;
+              case 1:
+                host.navigateLineStart();
+                break;
+              case 2:
+                host.navigateWordLeft();
+                break;
+              case 4:
+                host.navigateLeft();
+                break;
+              case 5:
+                host.navigateRight();
+                break;
+              case 7:
+                host.navigateWordRight();
+                break;
+              case 8:
+                host.navigateLineEnd();
+                break;
+              case 9:
+                host.navigateDown();
+                break;
+            }
+          } else {
+            switch (selectionEnd) {
+              case 6:
+                host.getSelection().selectRight();
+                break;
+              case 7:
+                host.getSelection().selectWordRight();
+                break;
+              case 8:
+                host.getSelection().selectLineEnd();
+                break;
+              case 9:
+                host.getSelection().selectDown();
+                break;
+            }
+            switch (selectionStart) {
+              case 0:
+                host.getSelection().selectUp();
+                break;
+              case 1:
+                host.getSelection().selectLineStart();
+                break;
+              case 2:
+                host.getSelection().selectWordLeft();
+                break;
+              case 3:
+                host.getSelection().selectLeft();
+                break;
+            }
+          }
         });
     }
-
-    var onSelect = function(e) {
-        if (isAllSelected(text)) {
-            host.selectAll();
-            resetSelection();
-        } else if (inputHandler) {
-            resetSelection(host.selection.isEmpty());
-        }
-    };
-
-    var inputHandler = null;
-    this.setInputHandler = function(cb) {inputHandler = cb};
-    this.getInputHandler = function() {return inputHandler};
-    var afterContextMenu = false;
-    
-    var sendText = function(data) {
-        if (text.selectionStart === 4 && text.selectionEnd === 5) {
-          return;
-        }
-        if (inputHandler) {
-            data = inputHandler(data);
-            inputHandler = null;
-        }
-        if (pasted) {
-            resetSelection();
-            if (data)
-                host.onPaste(data);
-            pasted = false;
-        } else if (data == PLACEHOLDER.substr(0) && text.selectionStart === 4) {
-            if (afterContextMenu)
-                host.execCommand("del", {source: "ace"});
-            else // some versions of android do not fire keydown when pressing backspace
-                host.execCommand("backspace", {source: "ace"});
-        } else if (!copied) {
-            if (data.substring(0, 9) == PLACEHOLDER && data.length > PLACEHOLDER.length)
-                data = data.substr(9);
-            else if (data.substr(0, 4) == PLACEHOLDER.substr(0, 4))
-                data = data.substr(4, data.length - PLACEHOLDER.length + 1);
-            else if (data.charAt(data.length - 1) == PLACEHOLDER.charAt(0))
-                data = data.slice(0, -1);
-            if (data === "\n") {
-            } else if (data.charAt(data.length - 1) == PLACEHOLDER.charAt(0))
-                data = data.slice(0, -1);
-            
-            if (data)
-                host.onTextInput(data);
-        }
-        if (copied) {
-          copied = false;
-        }
-        if (afterContextMenu)
-            afterContextMenu = false;
-    };
-    var onInput = function(e) {
-        if (inComposition)
-            return;
-        var data = text.value;
-        sendText(data);
-        resetValue();
-    };
-    
-    var handleClipboardData = function(e, data, forceIEMime) {
-        var clipboardData = e.clipboardData || window.clipboardData;
-        if (!clipboardData || BROKEN_SETDATA)
-            return;
-        var mime = USE_IE_MIME_TYPE || forceIEMime ? "Text" : "text/plain";
-        try {
-            if (data) {
-                return clipboardData.setData(mime, data) !== false;
-            } else {
-                return clipboardData.getData(mime);
-            }
-        } catch(e) {
-            if (!forceIEMime)
-                return handleClipboardData(e, data, true);
-        }
-    };
-
-    var doCopy = function(e, isCut) {
-        var data = host.getCopyText();
-        
-        if (!data)
-            return event.preventDefault(e);
-
-        if (handleClipboardData(e, data)) {
-            cut = isCut;
-            text.value = "\n aa" + data + "a a\n";
-            text.setSelectionRange(4, 4 + data.length);
-            copied = {
-              value: data
-            };
-            isCut ? host.onCut() : host.onCopy();
-        } else {
-            copied = true;
-            text.value = data;
-            text.select();
-            setTimeout(function(){
-                copied = false;
-                resetValue();
-                resetSelection();
-                isCut ? host.onCut() : host.onCopy();
-            });
-        }
-    };
-    
-    var onCut = function(e) {
-        doCopy(e, true);
-    };
-    
-    var onCopy = function(e) {
-        doCopy(e, false);
-    };
-    
-    var onPaste = function(e) {
-        var data = handleClipboardData(e);
-        if (typeof data == "string") {
-            if (data)
-                host.onPaste(data, e);
-            if (useragent.isIE)
-                setTimeout(resetSelection);
-            event.preventDefault(e);
-        }
-        else {
-            text.value = "";
-            pasted = true;
-        }
-    };
-
-    event.addCommandKeyListener(text, host.onCommandKey.bind(host));
-
-    event.addListener(text, "select", onSelect);
-
-    event.addListener(text, "input", onInput);
-
-    event.addListener(text, "cut", onCut);
-    event.addListener(text, "copy", onCopy);
-    event.addListener(text, "paste", onPaste);
-    if (!('oncut' in text) || !('oncopy' in text) || !('onpaste' in text)){
-        event.addListener(parentNode, "keydown", function(e) {
-            if ((useragent.isMac && !e.metaKey) || !e.ctrlKey)
-                return;
-
-            switch (e.keyCode) {
-                case 67:
-                    onCopy(e);
-                    break;
-                case 86:
-                    onPaste(e);
-                    break;
-                case 88:
-                    onCut(e);
-                    break;
-            }
-        });
-    }
-    var onCompositionStart = function(e) {
-        if (inComposition || !host.onCompositionStart || host.$readOnly) 
-            return;
-        inComposition = {};
-        inComposition.canUndo = host.session.$undoManager;
-        host.onCompositionStart();
-        setTimeout(onCompositionUpdate, 0);
-        host.on("mousedown", onCompositionEnd);
-        if (inComposition.canUndo && !host.selection.isEmpty()) {
-            host.insert("");
-            host.session.markUndoGroup();
-            host.selection.clearSelection();
-        }
-        host.session.markUndoGroup();
-    };
-
-    var onCompositionUpdate = function() {
-        if (!inComposition || !host.onCompositionUpdate || host.$readOnly)
-            return;
-        var val = text.value.replace(/\x01/g, "");
-        if (inComposition.lastValue === val) return;
-        
-        host.onCompositionUpdate(val);
-        if (inComposition.lastValue)
-            host.undo();
-        if (inComposition.canUndo)
-            inComposition.lastValue = val;
-        if (inComposition.lastValue) {
-            var r = host.selection.getRange();
-            host.insert(inComposition.lastValue);
-            host.session.markUndoGroup();
-            inComposition.range = host.selection.getRange();
-            host.selection.setRange(r);
-            host.selection.clearSelection();
-        }
-    };
-
-    var onCompositionEnd = function(e) {
-        if (!host.onCompositionEnd || host.$readOnly) return;
-        var c = inComposition;
-        inComposition = false;
-        var timer = setTimeout(function() {
-            timer = null;
-            var str = text.value.replace(/\x01/g, "");
-            if (inComposition)
-                return;
-            else if (str == c.lastValue)
-                resetValue();
-            else if (!c.lastValue && str) {
-                resetValue();
-                sendText(str);
-            }
-        });
-        inputHandler = function compositionInputHandler(str) {
-            if (timer)
-                clearTimeout(timer);
-            str = str.replace(/\x01/g, "");
-            if (str == c.lastValue)
-                return "";
-            if (c.lastValue && timer)
-                host.undo();
-            return str;
-        };
-        host.onCompositionEnd();
-        host.removeListener("mousedown", onCompositionEnd);
-        if (e.type == "compositionend" && c.range) {
-            host.selection.setRange(c.range);
-        }
-        if (useragent.isChrome && useragent.isChrome >= 53) {
-          onInput();
-        }
-    };
-    
-    
-
-    var syncComposition = lang.delayedCall(onCompositionUpdate, 50);
-
-    event.addListener(text, "compositionstart", onCompositionStart);
-    if (useragent.isGecko) {
-        event.addListener(text, "text", function(){syncComposition.schedule()});
-    } else {
-        event.addListener(text, "keyup", function(){syncComposition.schedule()});
-        event.addListener(text, "keydown", function(){syncComposition.schedule()});
-    }
-    event.addListener(text, "compositionend", onCompositionEnd);
-
-    this.getElement = function() {
-        return text;
-    };
-
-    this.setReadOnly = function(readOnly) {
-       text.readOnly = readOnly;
-    };
-
-    this.onContextMenu = function(e) {
-        afterContextMenu = true;
-        resetSelection(host.selection.isEmpty());
-        host._emit("nativecontextmenu", {target: host, domEvent: e});
-        this.moveToMouse(e, true);
-    };
-    
-    this.moveToMouse = function(e, bringToFront) {
-        if (!bringToFront && useragent.isOldIE)
-            return;
-        if (!tempStyle)
-            tempStyle = text.style.cssText;
-        text.style.cssText = (bringToFront ? "z-index:100000;" : "")
-            + "height:" + text.style.height + ";"
-            + (useragent.isIE ? "opacity:0.1;" : "");
-
-        var rect = host.container.getBoundingClientRect();
-        var style = dom.computedStyle(host.container);
-        var left = rect.left + (parseInt(rect.borderLeftWidth) || 0);
-        var move = function(e) {
-            text.style.left = e.clientX - left - 2 + "px";
-        }; 
-        move(e);
-
-        if (e.type != "mousedown")
-            return;
-
-        if (host.renderer.$keepTextAreaAtCursor)
-            host.renderer.$keepTextAreaAtCursor = null;
-
-        clearTimeout(closeTimeout);
-        if (useragent.isWin && !useragent.isOldIE)
-            event.capture(host.container, move, onContextMenuClose);
-    };
-
-    this.onContextMenuClose = onContextMenuClose;
-    var closeTimeout;
-    function onContextMenuClose() {
-        clearTimeout(closeTimeout);
-        closeTimeout = setTimeout(function () {
-            if (tempStyle) {
-                text.style.cssText = tempStyle;
-                tempStyle = '';
-            }
-            if (host.renderer.$keepTextAreaAtCursor == null) {
-                host.renderer.$keepTextAreaAtCursor = true;
-                host.renderer.$moveTextAreaToCursor();
-            }
-        }, useragent.isOldIE ? 200 : 0);
-    }
-
-    var onContextMenu = function(e) {
-        host.textInput.onContextMenu(e);
-        onContextMenuClose();
-    };
-    event.addListener(text, "mouseup", onContextMenu);
-    event.addListener(text, "mousedown", function(e) {
-        e.preventDefault();
-        onContextMenuClose();
-    });
-    event.addListener(host.renderer.scroller, "contextmenu", onContextMenu);
-    event.addListener(text, "contextmenu", onContextMenu);
-    
-    
-    var typingResetTimeout = null;
-    var typing = false;
-
-    parentNode.addEventListener("keydown", function (e) {
-      if (typingResetTimeout) clearTimeout(typingResetTimeout);
-      typing = true;
-    });
-    
-    parentNode.addEventListener("keyup", function (e) {
-      typingResetTimeout = setTimeout(function () {
-        typing = false;
-      }, 100);
-    });
-    document.addEventListener("selectionchange", function (e) {
-      if (document.activeElement !== text) {
-        return;
-      }
-      if (typing) {
-        return;
-      }
-      if (cut) {
-        setTimeout(function () {
-          cut = false;
-        }, 100);
-        return;
-      }
-      var selectionStart = text.selectionStart;
-      var selectionEnd = text.selectionEnd;
-      text.setSelectionRange(4, 5);
-      if (selectionStart == selectionEnd) {
-        switch (selectionStart) {
-          case 0:
-            host.navigateUp();
-            break;
-          case 1:
-            host.navigateLineStart();
-            break;
-          case 2:
-            host.navigateWordLeft();
-            break;
-          case 4:
-            host.navigateLeft();
-            break;
-          case 5:
-            host.navigateRight();
-            break;
-          case 7:
-            host.navigateWordRight();
-            break;
-          case 8:
-            host.navigateLineEnd();
-            break;
-          case 9:
-            host.navigateDown();
-            break;
-        }
-      } else {
-        switch (selectionEnd) {
-          case 6:
-            host.getSelection().selectRight();
-            break;
-          case 7:
-            host.getSelection().selectWordRight();
-            break;
-          case 8:
-            host.getSelection().selectLineEnd();
-            break;
-          case 9:
-            host.getSelection().selectDown();
-            break;
-        }
-        switch (selectionStart) {
-          case 0:
-            host.getSelection().selectUp();
-            break;
-          case 1:
-            host.getSelection().selectLineStart();
-            break;
-          case 2:
-            host.getSelection().selectWordLeft();
-            break;
-          case 3:
-            host.getSelection().selectLeft();
-            break;
-        }
-      }
-      text.style.height = "100px";
-      text.style.width = "100px";
-    });
 };
 
 exports.TextInput = TextInput;
@@ -12201,7 +11748,7 @@ exports.commands = [{
 
 });
 
-ace.define("ace/editor",["require","exports","module","ace/lib/fixoldbrowsers","ace/lib/oop","ace/lib/dom","ace/lib/lang","ace/lib/useragent","ace/keyboard/textinput","ace/keyboard/textinput_ios","ace/mouse/mouse_handler","ace/mouse/fold_handler","ace/keyboard/keybinding","ace/edit_session","ace/search","ace/range","ace/lib/event_emitter","ace/commands/command_manager","ace/commands/default_commands","ace/config","ace/token_iterator"], function(acequire, exports, module) {
+ace.define("ace/editor",["require","exports","module","ace/lib/fixoldbrowsers","ace/lib/oop","ace/lib/dom","ace/lib/lang","ace/lib/useragent","ace/keyboard/textinput","ace/mouse/mouse_handler","ace/mouse/fold_handler","ace/keyboard/keybinding","ace/edit_session","ace/search","ace/range","ace/lib/event_emitter","ace/commands/command_manager","ace/commands/default_commands","ace/config","ace/token_iterator"], function(acequire, exports, module) {
 "use strict";
 
 acequire("./lib/fixoldbrowsers");
@@ -12211,7 +11758,6 @@ var dom = acequire("./lib/dom");
 var lang = acequire("./lib/lang");
 var useragent = acequire("./lib/useragent");
 var TextInput = acequire("./keyboard/textinput").TextInput;
-var TextInput_iOS = acequire("./keyboard/textinput_ios").TextInput;
 var MouseHandler = acequire("./mouse/mouse_handler").MouseHandler;
 var FoldHandler = acequire("./mouse/fold_handler").FoldHandler;
 var KeyBinding = acequire("./keyboard/keybinding").KeyBinding;
@@ -12230,13 +11776,7 @@ var Editor = function(renderer, session) {
     this.id = "editor" + (++Editor.$uid);
 
     this.commands = new CommandManager(useragent.isMac ? "mac" : "win", defaultCommands);
-    
-    var iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    if (iOS) {
-      this.textInput = new TextInput_iOS(renderer.getTextAreaContainer(), this);
-    } else {
-      this.textInput = new TextInput(renderer.getTextAreaContainer(), this);
-    }
+    this.textInput  = new TextInput(renderer.getTextAreaContainer(), this);
     this.renderer.textarea = this.textInput.getElement();
     this.keyBinding = new KeyBinding(this);
     this.$mouseHandler = new MouseHandler(this);
